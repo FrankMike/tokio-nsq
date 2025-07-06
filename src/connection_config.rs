@@ -1,5 +1,5 @@
-use ::regex::Regex;
-use ::std::sync::Arc;
+use regex::Regex;
+use std::sync::Arc;
 
 /// A smart constructor validating a deflate compression level
 #[derive(Clone, Debug)]

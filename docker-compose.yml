@@ -1,7 +1,4 @@
-version: '2.3'
-
 services:
-
   nsq:
     image: nsqio/nsq
     restart: always

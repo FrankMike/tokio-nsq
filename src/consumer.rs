@@ -1,9 +1,10 @@
-use ::anyhow::Error;
-use ::core::result::Result;
-use ::log::*;
-use ::std::collections::HashMap;
-use ::std::collections::HashSet;
-use ::std::sync::Arc;
+use anyhow::Error;
+use core::result::Result;
+use log::*;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::connection::*;
 use crate::connection_config::*;
@@ -213,30 +214,35 @@ async fn lookup(
     >,
     from_connections_tx: &tokio::sync::mpsc::Sender<NSQEvent>,
 ) -> Result<(), Error> {
-    let raw_uri = (address.to_owned() + "/lookup?topic=" + &config.topic.topic)
-        .to_string();
+    let request_url =
+        format!("http://{}/lookup?topic={}", address, &config.topic.topic);
+    let client = reqwest::Client::new();
 
-    let uri = raw_uri.parse::<hyper::Uri>()?;
-
-    let client = hyper::Client::new();
-
-    let request = hyper::Request::builder()
-        .method(hyper::Method::GET)
-        .uri(uri)
+    let response = client
+        .get(&request_url)
         .header("Accept", "application/vnd.nsq; version=1.0")
-        .body(hyper::Body::empty())?;
+        .send()
+        .await?;
 
-    let response = client.request(request).await?;
+    let result = response.json::<LookupResponse>().await;
 
-    let buffer = hyper::body::to_bytes(response).await?;
+    let lookup_result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            error!(
+                "Parsing lookup failed for {} with error: {}",
+                address, error
+            );
+            return Err(error.into());
+        }
+    };
 
-    let lookup_response: LookupResponse = serde_json::from_slice(&buffer)?;
     let mut new_clients = Vec::new();
 
     {
         let mut guard = clients_ref.write().unwrap();
 
-        for producer in lookup_response.producers.iter() {
+        for producer in lookup_result.producers.iter() {
             let address = producer.broadcast_address.clone()
                 + ":"
                 + &producer.tcp_port.to_string();

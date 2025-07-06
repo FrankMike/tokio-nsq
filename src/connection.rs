@@ -1,27 +1,32 @@
-use ::anyhow::Error;
-use ::async_compression::tokio::bufread::DeflateDecoder;
-use ::async_compression::tokio::write::DeflateEncoder;
-use ::backoff::backoff::Backoff;
-use ::futures::Future;
-use ::futures_util::FutureExt;
-use ::log::*;
-use ::rustls::*;
-use ::std::convert::TryFrom;
-use ::std::pin::Pin;
-use ::std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
-use ::std::sync::Arc;
-use ::std::task::Poll;
-use ::std::time::Duration;
-use ::std::time::Instant;
-use ::thiserror::Error;
-use ::tokio::io::AsyncRead;
-use ::tokio::io::AsyncReadExt;
-use ::tokio::io::AsyncWrite;
-use ::tokio::io::AsyncWriteExt;
-use ::tokio::io::ReadBuf;
-use ::tokio::time::{sleep, Sleep};
-use ::tokio_rustls::webpki::DNSNameRef;
-use ::tokio_rustls::{rustls::ClientConfig, TlsConnector};
+use anyhow::Error;
+use async_compression::tokio::{
+    bufread::DeflateDecoder, write::DeflateEncoder,
+};
+use backoff::backoff::Backoff;
+use futures::Future;
+use futures_util::FutureExt;
+use log::*;
+use rustls::{
+    DigitallySignedStruct, Error as TLSError, SignatureScheme,
+    client::danger::{
+        HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+    },
+    pki_types::{CertificateDer, ServerName, UnixTime},
+};
+use std::{
+    convert::TryFrom,
+    pin::Pin,
+    sync::Arc,
+    sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
+    task::Poll,
+    time::{Duration, Instant},
+};
+use thiserror::Error;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf},
+    time::{Sleep, sleep},
+};
+use tokio_rustls::{TlsConnector, rustls::ClientConfig};
 
 use crate::built_info;
 use crate::connection_config::*;
@@ -42,17 +47,41 @@ struct ProtocolError {
     message: String,
 }
 
+#[derive(Debug)]
 struct Unverified {}
 
 impl ServerCertVerifier for Unverified {
     fn verify_server_cert(
         &self,
-        _roots: &RootCertStore,
-        _presented_certs: &[Certificate],
-        _dns_name: DNSNameRef,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
+        _now: UnixTime,
     ) -> Result<ServerCertVerified, TLSError> {
         Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        todo!()
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        todo!()
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        todo!()
     }
 }
 
@@ -521,7 +550,9 @@ async fn handle_single_command<S: AsyncWrite + std::marker::Unpin>(
                 let max_ready = shared.max_ready.load(Ordering::SeqCst);
 
                 let actual_ready = if requested_ready > max_ready {
-                    warn!("requested_ready > max_ready setting ready to max_ready");
+                    warn!(
+                        "requested_ready > max_ready setting ready to max_ready"
+                    );
 
                     max_ready
                 } else {
@@ -759,15 +790,16 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
 
         let config = match &config_tls.client_config {
             Some(client_config) => client_config.clone(),
-            None => {
-                let mut config = ClientConfig::new();
-                config.dangerous().set_certificate_verifier(verifier);
-                Arc::new(config)
-            }
+            None => Arc::new(
+                ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(verifier)
+                    .with_no_client_auth(),
+            ),
         };
 
         let config = TlsConnector::from(config);
-        let dnsname = DNSNameRef::try_from_ascii_str(&config_tls.domain_name)?;
+        let dnsname = ServerName::try_from(config_tls.domain_name.clone())?;
 
         // Turn stream back into TcpStream as rustls does buffering itself
         let stream = stream.into_inner().into_inner();
@@ -806,7 +838,7 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
         {
             let stream_tx = DeflateEncoder::with_quality(
                 stream_tx,
-                async_compression::Level::Precise(level.get() as u32),
+                async_compression::Level::Precise(level.get() as i32),
             );
 
             let mut stream_rx = tokio::io::BufReader::new(DeflateDecoder::new(
@@ -1122,7 +1154,7 @@ where
         cx: &mut std::task::Context,
         buf: &mut ReadBuf,
     ) -> Poll<Result<(), std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if Pin::new(&mut me.inner).poll_read(cx, buf).is_ready() {
             me.read_delay = None;
             return Poll::Ready(Ok(()));
@@ -1155,7 +1187,7 @@ where
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if let Poll::Ready(n) = Pin::new(&mut me.inner).poll_write(cx, buf) {
             me.write_delay = None;
             return Poll::Ready(n);
@@ -1182,7 +1214,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if Pin::new(&mut me.inner).poll_flush(cx).is_ready() {
             me.write_delay = None;
             return Poll::Ready(Ok(()));
@@ -1209,7 +1241,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if Pin::new(&mut me.inner).poll_shutdown(cx).is_ready() {
             me.write_delay = None;
             return Poll::Ready(Ok(()));

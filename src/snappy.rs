@@ -1,10 +1,6 @@
-use ::core::task::Context;
-use ::core::task::Poll;
-use ::std::pin::Pin;
-use ::tokio::io::AsyncRead;
-use ::tokio::io::AsyncWrite;
-use ::tokio::io::ReadBuf;
-use ::tokio::io::Result;
+use core::task::{Context, Poll};
+use std::pin::Pin;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, Result};
 
 // start section copied from https://github.com/BurntSushi/rust-snappy
 
@@ -265,9 +261,8 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use ::std::io::Cursor;
-    use ::tokio::io::AsyncReadExt;
-    use ::tokio::io::AsyncWriteExt;
+    use std::io::Cursor;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn test_snappy_identity_small() {

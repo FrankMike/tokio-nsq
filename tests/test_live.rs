@@ -1,19 +1,21 @@
 #[macro_use]
 extern crate matches;
 
-use ::rand::distributions::Alphanumeric;
-use ::rand::{thread_rng, Rng};
-use ::std::collections::HashSet;
-use ::std::sync::Arc;
-use ::tokio_nsq::*;
+use rand::{Rng, distr::Alphanumeric, rng};
+use std::{collections::HashSet, sync::Arc};
+use tokio_nsq::*;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
 fn random_topic() -> Arc<NSQTopic> {
-    let name: String =
-        thread_rng().sample_iter(&Alphanumeric).take(30).collect();
+    let mut rng = rng();
+    let name: String = (&mut rng)
+        .sample_iter(&Alphanumeric)
+        .take(30)
+        .map(char::from)
+        .collect();
 
     NSQTopic::new(name).unwrap()
 }
@@ -107,7 +109,7 @@ fn make_default() -> (Arc<NSQTopic>, NSQProducer, NSQConsumer) {
     let consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(1)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .build();
 
@@ -155,7 +157,7 @@ async fn direct_connection_inflight_10() {
     let consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(10)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .build();
 
@@ -202,7 +204,7 @@ async fn direct_connection_deflate() {
     let consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(1)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .set_shared(NSQConfigShared::new().set_compression(
             NSQConfigSharedCompression::Deflate(
@@ -228,7 +230,7 @@ async fn direct_connection_encryption() {
     let consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(1)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .set_shared(
             NSQConfigShared::new().set_tls(NSQConfigSharedTLS::new("test.com")),
@@ -256,7 +258,7 @@ async fn direct_connection_encryption_and_deflate() {
     let consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(1)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .set_shared(
             NSQConfigShared::new()
@@ -285,7 +287,7 @@ async fn direct_connection_snappy() {
     let consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(1)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .set_shared(
             NSQConfigShared::new()
@@ -313,7 +315,7 @@ async fn direct_connection_snappy_large() {
     let mut consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(1)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .set_shared(
             NSQConfigShared::new()
@@ -350,7 +352,7 @@ async fn direct_connection_encryption_and_snappy() {
     let consumer = NSQConsumerConfig::new(topic.clone(), channel)
         .set_max_in_flight(1)
         .set_sources(NSQConsumerConfigSources::Daemons(vec![
-            "nsq:4150".to_string()
+            "nsq:4150".to_string(),
         ]))
         .set_shared(
             NSQConfigShared::new()
