@@ -171,8 +171,7 @@ impl NSQMessage {
     /// Sends a message acknowledgement to NSQ.
     pub async fn finish(mut self) {
         if self.context.healthy.load(Ordering::SeqCst) {
-            let _ = self
-                .context
+            self.context
                 .to_connection_tx_ref
                 .send(MessageToNSQ::FIN(self.id))
                 .await
@@ -217,12 +216,18 @@ impl Drop for NSQMessage {
     fn drop(&mut self) {
         if !self.consumed {
             if self.context.healthy.load(Ordering::SeqCst) {
-                let _ =
-                    self.context.to_connection_tx_ref.send(MessageToNSQ::REQ(
-                        self.id,
-                        self.attempt,
-                        NSQRequeueDelay::DefaultDelay,
-                    ));
+                let tx = self.context.to_connection_tx_ref.clone();
+                let id = self.id;
+                let attempt = self.attempt;
+                tokio::spawn(async move {
+                    let _ = tx
+                        .send(MessageToNSQ::REQ(
+                            id,
+                            attempt,
+                            NSQRequeueDelay::DefaultDelay,
+                        ))
+                        .await;
+                });
             } else {
                 error!("NSQMessage::drop failed");
             }
@@ -284,25 +289,23 @@ async fn read_frame_data<S: AsyncRead + std::marker::Unpin>(
 
     match frame_type {
         FRAME_TYPE_RESPONSE => {
-            let mut frame_body = Vec::new();
-            frame_body.resize(frame_body_size as usize, 0);
+            let mut frame_body = vec![0; frame_body_size as usize];
             stream.read_exact(&mut frame_body).await?;
 
             Ok(Frame::Response(frame_body))
         }
         FRAME_TYPE_ERROR => {
-            let mut frame_body = Vec::new();
-            frame_body.resize(frame_body_size as usize, 0);
+            let mut frame_body = vec![0; frame_body_size as usize];
             stream.read_exact(&mut frame_body).await?;
 
             match frame_body.as_slice() {
                 b"E_FIN_FAILED" | b"E_REQ_FAILED" | b"E_TOUCH_FAILED" => {
-                    warn!("non fatal protocol error {:?}", frame_body);
+                    warn!("non fatal protocol error {frame_body:?}");
 
                     Ok(Frame::Error(frame_body))
                 }
                 _ => {
-                    error!("fatal protocol error = {:?}", frame_body);
+                    error!("fatal protocol error = {frame_body:?}");
 
                     let message = String::from_utf8(frame_body)?;
 
@@ -318,8 +321,7 @@ async fn read_frame_data<S: AsyncRead + std::marker::Unpin>(
             stream.read_exact(&mut message_id).await?;
 
             let body_size = frame_body_size - 8 - 2 - 16;
-            let mut message_body = Vec::new();
-            message_body.resize(body_size as usize, 0);
+            let mut message_body = vec![0; body_size as usize];
             stream.read_exact(&mut message_body).await?;
 
             Ok(Frame::Message(FrameMessage {
@@ -330,7 +332,7 @@ async fn read_frame_data<S: AsyncRead + std::marker::Unpin>(
             }))
         }
         _ => {
-            error!("frame_type unknown = {}", frame_type);
+            error!("frame_type unknown = {frame_type}");
             Ok(Frame::Unknown)
         }
     }
@@ -354,7 +356,7 @@ async fn handle_reads<S: AsyncRead + std::marker::Unpin>(
                 continue;
             }
             Frame::Error(err) => {
-                error!("received error frame: {:?}", err);
+                error!("received error frame: {err:?}");
                 // should be impossible except for non fatal errors based on
                 // `read_frame_data`
             }
@@ -375,8 +377,7 @@ async fn handle_reads<S: AsyncRead + std::marker::Unpin>(
                 continue;
             }
             Frame::Unknown => {
-                return Err(Error::from(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Error::from(std::io::Error::other(
                     "unknown frame type",
                 )));
             }
@@ -645,15 +646,13 @@ async fn run_generic<
         match read_frame_data(&mut stream_rx).await? {
             Frame::Response(body) => {
                 if body != b"OK" {
-                    return Err(Error::from(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(Error::from(std::io::Error::other(
                         "subscribe negotiation expected response OK",
                     )));
                 }
             }
             _ => {
-                return Err(Error::from(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Error::from(std::io::Error::other(
                     "subscribe negotiation expected standard response",
                 )));
             }
@@ -756,8 +755,7 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
     let settings: IdentifyResponse = match read_frame_data(&mut stream).await? {
         Frame::Response(body) => serde_json::from_slice(&body)?,
         _ => {
-            return Err(Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Error::from(std::io::Error::other(
                 "feature negotiation failed",
             )));
         }
@@ -770,8 +768,7 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
 
     let config_tls = if let Some(config_tls) = &state.config.shared.tls {
         if config_tls.required && !settings.tls_v1 {
-            return Err(Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(Error::from(std::io::Error::other(
                 "tls required but not supported by nsqd",
             )));
         }
@@ -811,15 +808,13 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
         match read_frame_data(&mut stream_rx).await? {
             Frame::Response(body) => {
                 if body != b"OK" {
-                    return Err(Error::from(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(Error::from(std::io::Error::other(
                         "tls negotiation expected OK",
                     )));
                 }
             }
             _ => {
-                return Err(Error::from(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Error::from(std::io::Error::other(
                     "tls negotiation failed",
                 )));
             }
@@ -848,15 +843,13 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
             match read_frame_data(&mut stream_rx).await? {
                 Frame::Response(body) => {
                     if body != b"OK" {
-                        return Err(Error::from(std::io::Error::new(
-                            std::io::ErrorKind::Other,
+                        return Err(Error::from(std::io::Error::other(
                             "compression negotiation expected OK",
                         )));
                     }
                 }
                 _ => {
-                    return Err(Error::from(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(Error::from(std::io::Error::other(
                         "compression negotiation failed",
                     )));
                 }
@@ -877,15 +870,13 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
             match read_frame_data(&mut stream_rx).await? {
                 Frame::Response(body) => {
                     if body != b"OK" {
-                        return Err(Error::from(std::io::Error::new(
-                            std::io::ErrorKind::Other,
+                        return Err(Error::from(std::io::Error::other(
                             "compression negotiation expected OK",
                         )));
                     }
                 }
                 _ => {
-                    return Err(Error::from(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(Error::from(std::io::Error::other(
                         "compression negotiation failed",
                     )));
                 }
@@ -903,8 +894,7 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
         match read_frame_data(&mut stream_rx).await? {
             Frame::Response(_body) => {}
             _ => {
-                return Err(Error::from(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Error::from(std::io::Error::other(
                     "authentication failed",
                 )));
             }
@@ -932,19 +922,20 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
                 state.shared.healthy.store(false, Ordering::SeqCst);
                 state.shared.current_ready.store(0, Ordering::SeqCst);
 
-                let _ = state.from_connection_tx.send(NSQEvent::Unhealthy());
+                let _ =
+                    state.from_connection_tx.send(NSQEvent::Unhealthy()).await;
 
                 if let Some(error) = generic.downcast_ref::<tokio::io::Error>()
                 {
-                    error!("tokio io error: {}", error);
+                    error!("tokio io error: {error}");
                 } else if let Some(error) =
                     generic.downcast_ref::<serde_json::Error>()
                 {
-                    error!("serde json error: {}", error);
+                    error!("serde json error: {error}");
 
                     return;
                 } else {
-                    error!("unknown error {}", generic);
+                    error!("unknown error {generic}");
 
                     return;
                 }
@@ -967,7 +958,7 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
         }
 
         if drained != 0 {
-            warn!("drained {} messages", drained);
+            warn!("drained {drained} messages");
         }
 
         if now.elapsed() >= state.config.shared.backoff_healthy_after {
@@ -1090,8 +1081,7 @@ impl NSQDConnection {
     ) -> Result<(), Error> {
         if self.shared.healthy.load(Ordering::SeqCst) {
             if self.to_connection_tx_ref.send(message).await.is_err() {
-                return Err(Error::from(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Error::from(std::io::Error::other(
                     "queue message lock failed",
                 )));
             }
@@ -1100,8 +1090,7 @@ impl NSQDConnection {
         } else {
             warn!("queue message unhealthy");
 
-            Err(Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(Error::from(std::io::Error::other(
                 "connection is disconnected",
             )))
         }

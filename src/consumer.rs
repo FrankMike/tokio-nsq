@@ -229,10 +229,7 @@ async fn lookup(
     let lookup_result = match result {
         Ok(result) => result,
         Err(error) => {
-            error!(
-                "Parsing lookup failed for {} with error: {}",
-                address, error
-            );
+            error!("Parsing lookup failed for {address} with error: {error}");
             return Err(error.into());
         }
     };
@@ -254,7 +251,7 @@ async fn lookup(
                     continue;
                 }
                 None => {
-                    info!("new producer: {}", address);
+                    info!("new producer: {address}");
 
                     let client = NSQDConnection::new_with_queue(
                         NSQDConfig {
@@ -313,7 +310,7 @@ async fn lookup_supervisor(
         let f = lookup(&address, &config, &clients_ref, &from_connections_tx);
 
         if let Err(generic) = f.await {
-            error!("lookup_supervisor unknown error {}", generic);
+            error!("lookup_supervisor unknown error {generic}");
         }
 
         tokio::time::sleep(poll_interval).await;
@@ -387,7 +384,7 @@ impl NSQConsumer {
                 let mut guard = pool.clients_ref.write().unwrap();
 
                 for address in daemons.iter() {
-                    info!("new producer: {}", address);
+                    info!("new producer: {address}");
 
                     let client = NSQDConnection::new_with_queue(
                         NSQDConfig {
@@ -468,7 +465,7 @@ impl NSQConsumer {
 
             match event {
                 None => {
-                    trace!("filtered {:?}", event);
+                    trace!("filtered {event:?}");
 
                     return None;
                 }
