@@ -4,7 +4,7 @@ services:
     restart: always
     volumes:
       - ./keys:/keys:ro
-    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160 --tls-cert /keys/cert.pem --tls-key /keys/key.pem
+    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160 --lookupd-http-address=nsqlookupd:4161 --tls-cert /keys/cert.pem --tls-key /keys/key.pem
     depends_on:
       - nsqlookupd
 
@@ -38,6 +38,7 @@ services:
   dev:
     image: rust
     working_dir: "/app"
-    user: "${UID}:${GID}"
+    user: "${UID:-1000}:${GID:-1000}"
     volumes:
       - .:/app:rw
+    command: tail -f /dev/null
