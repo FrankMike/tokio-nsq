@@ -18,8 +18,8 @@ byteorder         = "1.5.0"
 anyhow            = "1.0.98"
 thiserror         = "2.0.12"
 log               = "0.4.27"
-tokio-rustls      = "0.26.2"
-rustls            = "0.23.28"
+tokio-rustls      = { version = "0.26.2", features = ["ring"] }
+rustls            = { version = "0.23.29", features = ["ring"] }
 regex             = "1.11.1"
 lazy_static       = "1.5.0"
 backoff           = "0.4.0"

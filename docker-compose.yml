@@ -2,22 +2,30 @@ services:
   nsq:
     image: nsqio/nsq
     restart: always
+    ports:
+      - "4150:4150"
     volumes:
       - ./keys:/keys:ro
-    command: /nsqd --lookupd-tcp-address=nsqlookupd:4160 --lookupd-http-address=nsqlookupd:4161 --tls-cert /keys/cert.pem --tls-key /keys/key.pem
+    command: /nsqd --broadcast-address=localhost --lookupd-tcp-address=nsqlookupd:4160
     depends_on:
       - nsqlookupd
 
   nsqwithauth:
     image: nsqio/nsq
     restart: always
-    command: /nsqd --auth-http-address=nsqauth:8080
+    ports:
+      - "4151:4150"
+    volumes:
+      - ./keys:/keys:ro
+    command: /nsqd --broadcast-address=localhost --auth-http-address=nsqauth:8080 --tls-cert=/keys/cert.pem --tls-key=/keys/key.pem --tls-required=true
     depends_on:
       - nsqauth
 
   nsqlookupd:
     image: nsqio/nsq
     restart: always
+    ports:
+      - "4161:4161"
     command: /nsqlookupd
 
   nsqadmin:
